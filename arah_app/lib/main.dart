@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'app/theme/app_theme.dart';
 import 'screens/onboarding/role_selection_screen.dart';
 
@@ -8,7 +9,9 @@ import 'provider/home_provider.dart';
 import 'provider/order_provider.dart';
 import 'provider/request_provider.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
   runApp(
     MultiProvider(
       providers: [

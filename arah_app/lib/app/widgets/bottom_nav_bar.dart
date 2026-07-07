@@ -36,16 +36,10 @@ class ArahBottomNavBar extends StatelessWidget {
 
     if (currentIndex == 0) {
       // Navigating from Home to a new tab: push onto stack
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => screen),
-      );
+      Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
     } else {
       // Navigating between non-home tabs: replace to avoid infinite stack
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => screen),
-      );
+      Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
     }
   }
 

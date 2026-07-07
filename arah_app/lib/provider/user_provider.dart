@@ -5,12 +5,14 @@ import 'package:image_picker/image_picker.dart';
 
 class UserProvider with ChangeNotifier {
   File? _profileImage;
+  String _uid = "user123"; // Default mock user ID
   String _name = "Alex Johnson"; // Default mock user
   String _role = "Both"; // Buyer, Seller, Both
   String _experienceLevel = "Beginner";
   List<String> _skills = [];
 
   File? get profileImage => _profileImage;
+  String get uid => _uid;
   String get name => _name;
   String get role => _role;
   String get experienceLevel => _experienceLevel;
