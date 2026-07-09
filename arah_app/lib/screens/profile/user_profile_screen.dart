@@ -2,12 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/widgets/bottom_nav_bar.dart';
 import '../../provider/user_provider.dart';
+import '../../services/auth_service.dart';
+import '../auth/login_screen.dart';
+import 'settings_screen.dart';
 
 class UserProfileScreen extends StatefulWidget {
-  const UserProfileScreen({super.key});
+  final bool isSeller;
+  const UserProfileScreen({super.key, this.isSeller = false});
 
   @override
   State<UserProfileScreen> createState() => _UserProfileScreenState();
@@ -30,7 +36,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                 leading: const Icon(Icons.photo_library),
                 title: const Text('Photo Gallery'),
                 onTap: () {
-                  userProvider.pickImage(ImageSource.gallery);
+                  userProvider.pickAndUploadImage(ImageSource.gallery);
                   Navigator.of(context).pop();
                 },
               ),
@@ -38,7 +44,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                 leading: const Icon(Icons.photo_camera),
                 title: const Text('Camera'),
                 onTap: () {
-                  userProvider.pickImage(ImageSource.camera);
+                  userProvider.pickAndUploadImage(ImageSource.camera);
                   Navigator.of(context).pop();
                 },
               ),
@@ -49,14 +55,33 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     );
   }
 
+  Future<void> _openLink(String url) async {
+    if (url.isEmpty) return;
+    final uri = Uri.tryParse(
+      url.startsWith('http') ? url : 'https://$url',
+    );
+    if (uri == null) return;
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open link')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final userProvider = context.watch<UserProvider>();
-    final _profileImage = userProvider.profileImage;
+    final profileImage = userProvider.profileImageFile;
     final userName = userProvider.name;
+    final bio = userProvider.bio;
+    final photoUrl = userProvider.photoUrl;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC), // Light grey background
+      backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
         automaticallyImplyLeading: false,
         backgroundColor: Colors.white,
@@ -72,17 +97,21 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         actions: [
           IconButton(
             icon: const Icon(CupertinoIcons.gear_alt, color: Colors.blueGrey),
-            onPressed: () {},
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const SettingsScreen()),
+            ),
           ),
         ],
       ),
-      bottomNavigationBar: const ArahBottomNavBar(currentIndex: 3),
+      bottomNavigationBar:
+          ArahBottomNavBar(currentIndex: 3, isSeller: widget.isSeller),
       body: SafeArea(
         child: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Top Section with White Background
+              // ─── Top White Card ───────────────────────────────────────
               Container(
                 width: double.infinity,
                 decoration: const BoxDecoration(
@@ -92,7 +121,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                     bottomRight: Radius.circular(24),
                   ),
                 ),
-                padding: const EdgeInsets.only(left: 20, right: 20, bottom: 30),
+                padding:
+                    const EdgeInsets.only(left: 20, right: 20, bottom: 30),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
@@ -102,15 +132,20 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                         width: 80,
                         height: 80,
                         decoration: BoxDecoration(
-                          color: const Color(0xFF6A4BFF), // Purple
+                          color: const Color(0xFF6A4BFF),
                           shape: BoxShape.circle,
                           border: Border.all(color: Colors.white, width: 3),
-                          image: _profileImage != null
+                          image: profileImage != null
                               ? DecorationImage(
-                                  image: FileImage(_profileImage),
+                                  image: FileImage(profileImage),
                                   fit: BoxFit.cover,
                                 )
-                              : null,
+                              : (photoUrl != null && photoUrl.isNotEmpty
+                                  ? DecorationImage(
+                                      image: NetworkImage(photoUrl),
+                                      fit: BoxFit.cover,
+                                    )
+                                  : null),
                           boxShadow: [
                             BoxShadow(
                               color: Colors.black.withOpacity(0.05),
@@ -120,9 +155,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                           ],
                         ),
                         alignment: Alignment.center,
-                        child: _profileImage == null
+                        child: (profileImage == null &&
+                                (photoUrl == null || photoUrl.isEmpty))
                             ? Text(
-                                userName.isNotEmpty ? userName[0] : "A",
+                                userName.isNotEmpty ? userName[0].toUpperCase() : "A",
                                 style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 36,
@@ -140,7 +176,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                           Row(
                             children: [
                               Text(
-                                userName,
+                                userName.isNotEmpty ? userName : 'Your Name',
                                 style: const TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold,
@@ -150,26 +186,28 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                               const SizedBox(width: 6),
                               const Icon(
                                 Icons.verified,
-                                color: Colors.blueAccent, // Blue verified icon
+                                color: Colors.blueAccent,
                                 size: 18,
                               ),
                             ],
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            "Computer Science Student,\nUI/UX Designer & Python Dev.",
+                            bio.isNotEmpty
+                                ? bio
+                                : 'No bio added yet. Tap settings to edit.',
                             style: TextStyle(
                               color: Colors.blueGrey.shade400,
                               fontSize: 13,
                               height: 1.3,
                             ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                           ),
                           const SizedBox(height: 8),
                           Container(
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 4,
-                            ),
+                                horizontal: 12, vertical: 4),
                             decoration: BoxDecoration(
                               color: Colors.blueAccent.withOpacity(0.1),
                               borderRadius: BorderRadius.circular(12),
@@ -192,29 +230,21 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
               Padding(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 20.0,
-                  vertical: 24.0,
-                ),
+                    horizontal: 20.0, vertical: 24.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Metrics Grid
+                    // ─── Metrics ───────────────────────────────────────
                     Row(
                       children: [
                         Expanded(
                           child: _buildMetricCard(
-                            "12",
-                            "Tasks Completed",
-                            const Color(0xFF10B981),
-                          ),
-                        ), // Green
+                              "12", "Tasks Completed", const Color(0xFF10B981)),
+                        ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: _buildMetricCard(
-                            "98%",
-                            "Trust Score",
-                            AppTheme.navyBlue,
-                          ),
+                              "98%", "Trust Score", AppTheme.navyBlue),
                         ),
                       ],
                     ),
@@ -223,23 +253,19 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                       children: [
                         Expanded(
                           child: _buildMetricCard(
-                            "1h",
-                            "Response Rate",
-                            AppTheme.navyBlue,
-                          ),
+                              "1h", "Response Rate", AppTheme.navyBlue),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: _buildMetricCard(
-                            "100%",
-                            "Completion Rate",
-                            AppTheme.navyBlue,
-                          ),
+                              "100%", "Completion Rate", AppTheme.navyBlue),
                         ),
                       ],
                     ),
 
                     const SizedBox(height: 32),
+
+                    // ─── Skills ────────────────────────────────────────
                     const Text(
                       "My Skills",
                       style: TextStyle(
@@ -252,36 +278,35 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
-                      children: (userProvider.skills.isEmpty 
-                          ? ["Python", "Figma", "UI/UX", "Data Analysis", "React"] 
-                          : userProvider.skills)
-                              .map(
-                                (skill) => Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 14,
-                                    vertical: 8,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white,
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(
-                                      color: const Color(0xFFE2E8F0),
-                                    ),
-                                  ),
-                                  child: Text(
-                                    skill,
-                                    style: TextStyle(
-                                      color: Colors.blueGrey.shade600,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
+                      children: (userProvider.skills.isEmpty
+                              ? ["Python", "Figma", "UI/UX", "Data Analysis", "React"]
+                              : userProvider.skills)
+                          .map(
+                            (skill) => Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                    color: const Color(0xFFE2E8F0)),
+                              ),
+                              child: Text(
+                                skill,
+                                style: TextStyle(
+                                  color: Colors.blueGrey.shade600,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
                                 ),
-                              )
-                              .toList(),
+                              ),
+                            ),
+                          )
+                          .toList(),
                     ),
 
                     const SizedBox(height: 32),
+
+                    // ─── Portfolio Links ───────────────────────────────
                     const Text(
                       "Portfolio & Links",
                       style: TextStyle(
@@ -291,15 +316,100 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    _buildLinkCard(Icons.device_hub_outlined, "GitHub Profile"),
+                    _buildLinkCard(
+                      Icons.device_hub_outlined,
+                      "GitHub Profile",
+                      url: userProvider.githubUrl,
+                      onTap: () => _openLink(userProvider.githubUrl),
+                    ),
                     const SizedBox(height: 12),
                     _buildLinkCard(
                       Icons.business_center_outlined,
                       "LinkedIn Profile",
                       isLinkedIn: true,
+                      url: userProvider.linkedinUrl,
+                      onTap: () => _openLink(userProvider.linkedinUrl),
                     ),
 
                     const SizedBox(height: 32),
+
+                    // ─── Reviews ───────────────────────────────────────
+                    const Text(
+                      "Reviews",
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.navyBlue,
+                        fontSize: 15,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (userProvider.uid.isEmpty)
+                      const Center(child: CircularProgressIndicator())
+                    else
+                      StreamBuilder<QuerySnapshot>(
+                        stream: FirebaseFirestore.instance
+                            .collection('users')
+                            .doc(userProvider.uid)
+                            .collection('ratings')
+                            .orderBy('createdAt', descending: true)
+                            .snapshots(),
+                      builder: (context, snapshot) {
+                        if (!snapshot.hasData) {
+                          return const Center(child: CircularProgressIndicator());
+                        }
+                        final docs = snapshot.data!.docs;
+                        if (docs.isEmpty) {
+                          return Text(
+                            "No reviews yet.",
+                            style: TextStyle(color: Colors.blueGrey.shade400),
+                          );
+                        }
+                        return Column(
+                          children: docs.map((doc) {
+                            final data = doc.data() as Map<String, dynamic>;
+                            final rating = (data['rating'] as num?)?.toDouble() ?? 0.0;
+                            final reviewText = data['reviewText'] as String? ?? '';
+                            if (reviewText.isEmpty && rating == 0) return const SizedBox.shrink();
+                            
+                            return Container(
+                              margin: const EdgeInsets.only(bottom: 12),
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: const Color(0xFFE2E8F0)),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.star, color: Color(0xFFF59E0B), size: 18),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        rating.toStringAsFixed(1),
+                                        style: const TextStyle(fontWeight: FontWeight.bold),
+                                      ),
+                                    ],
+                                  ),
+                                  if (reviewText.isNotEmpty) ...[
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      reviewText,
+                                      style: TextStyle(color: Colors.blueGrey.shade700, fontSize: 13),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            );
+                          }).toList(),
+                        );
+                      },
+                    ),
+
+                    const SizedBox(height: 32),
+
+                    // ─── Settings ──────────────────────────────────────
                     const Text(
                       "Settings",
                       style: TextStyle(
@@ -325,27 +435,24 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                       child: Column(
                         children: [
                           _buildSettingsTile(
-                            Icons.notifications_none_outlined,
-                            "Notifications",
+                            Icons.settings_outlined,
+                            "Advanced Settings",
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const SettingsScreen(),
+                              ),
+                            ),
                           ),
                           const Divider(
-                            height: 1,
-                            thickness: 1,
-                            color: Color(0xFFF1F5F9),
-                          ),
-                          _buildSettingsTile(
-                            Icons.lock_outline,
-                            "Privacy & Security",
-                          ),
-                          const Divider(
-                            height: 1,
-                            thickness: 1,
-                            color: Color(0xFFF1F5F9),
-                          ),
+                              height: 1,
+                              thickness: 1,
+                              color: Color(0xFFF1F5F9)),
                           _buildSettingsTile(
                             Icons.logout,
                             "Log Out",
                             isDestructive: true,
+                            onTap: () => _confirmLogout(context),
                           ),
                         ],
                       ),
@@ -405,52 +512,78 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     IconData icon,
     String title, {
     bool isLinkedIn = false,
+    String url = '',
+    VoidCallback? onTap,
   }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.01),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          isLinkedIn
-              ? Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: const Text(
-                    "in",
-                    style: TextStyle(
-                      color: Color(0xFF0077B5),
-                      fontWeight: FontWeight.bold,
-                      fontSize: 18,
+    final hasLink = url.isNotEmpty;
+    return GestureDetector(
+      onTap: hasLink ? onTap : null,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.01),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            isLinkedIn
+                ? Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: const Text(
+                      "in",
+                      style: TextStyle(
+                        color: Color(0xFF0077B5),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                      ),
+                    ),
+                  )
+                : Icon(icon, color: AppTheme.navyBlue, size: 22),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: AppTheme.navyBlue,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
                     ),
                   ),
-                )
-              : Icon(icon, color: AppTheme.navyBlue, size: 22),
-          const SizedBox(width: 12),
-          Text(
-            title,
-            style: const TextStyle(
-              color: AppTheme.navyBlue,
-              fontWeight: FontWeight.w600,
-              fontSize: 14,
+                  if (hasLink)
+                    Text(
+                      url,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.arahPurple,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                ],
+              ),
             ),
-          ),
-          const Spacer(),
-          const Icon(Icons.chevron_right, color: Colors.grey, size: 20),
-        ],
+            Icon(
+              hasLink ? Icons.open_in_new : Icons.add,
+              color: hasLink ? AppTheme.arahPurple : Colors.grey,
+              size: 18,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -459,13 +592,12 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     IconData icon,
     String title, {
     bool isDestructive = false,
+    VoidCallback? onTap,
   }) {
     return ListTile(
       leading: Icon(
         icon,
-        color: isDestructive
-            ? const Color(0xFFEF4444)
-            : AppTheme.navyBlue, // Red for logout
+        color: isDestructive ? const Color(0xFFEF4444) : AppTheme.navyBlue,
         size: 22,
       ),
       title: Text(
@@ -479,7 +611,50 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       trailing: isDestructive
           ? null
           : const Icon(Icons.chevron_right, color: Colors.grey, size: 20),
-      onTap: () {},
+      onTap: onTap,
+    );
+  }
+
+  void _confirmLogout(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Log Out',
+            style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.navyBlue)),
+        content: const Text(
+          'Are you sure you want to log out?',
+          style: TextStyle(fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Cancel',
+                style: TextStyle(color: Colors.blueGrey.shade500)),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              final authService = FirebaseAuthService();
+              await authService.signOut();
+              context.read<UserProvider>().clearUser();
+              if (!context.mounted) return;
+              Navigator.pushAndRemoveUntil(
+                context,
+                MaterialPageRoute(builder: (_) => const LoginScreen()),
+                (route) => false,
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+              foregroundColor: Colors.white,
+              minimumSize: const Size(0, 40),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: const Text('Log Out'),
+          ),
+        ],
+      ),
     );
   }
 }

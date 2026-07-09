@@ -1,46 +1,52 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import '../../app/theme/app_theme.dart';
 import '../../screens/home/home_screen.dart';
+import '../../screens/home/seller_home_screen.dart';
 import '../../screens/orders/my_orders_screen.dart';
-import '../../screens/chat/chat_screen.dart';
+import '../../screens/chat/chat_list_screen.dart';
 import '../../screens/profile/user_profile_screen.dart';
-import 'package:flutter/cupertino.dart';
 
 class ArahBottomNavBar extends StatelessWidget {
   final int currentIndex;
-  const ArahBottomNavBar({super.key, required this.currentIndex});
+  final bool isSeller;
+
+  const ArahBottomNavBar({
+    super.key,
+    required this.currentIndex,
+    this.isSeller = false,
+  });
 
   void _navigate(int index, BuildContext context) {
     if (index == currentIndex) return;
 
-    if (index == 0) {
-      // Return to root (Home)
-      Navigator.popUntil(context, (route) => route.isFirst);
-      return;
-    }
-
     Widget screen;
     switch (index) {
+      case 0:
+        // Home — return to the root (pop all until first) or replace
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(
+            builder: (_) =>
+                isSeller ? const SellerHomeScreen() : const BuyerHomeScreen(),
+          ),
+          (route) => false,
+        );
+        return;
       case 1:
-        screen = const MyOrdersScreen();
+        screen = MyOrdersScreen(isSeller: isSeller);
         break;
       case 2:
-        screen = const ChatScreen();
+        screen = ChatListScreen(isSeller: isSeller);
         break;
       case 3:
-        screen = const UserProfileScreen();
+        screen = UserProfileScreen(isSeller: isSeller);
         break;
       default:
         return;
     }
 
-    if (currentIndex == 0) {
-      // Navigating from Home to a new tab: push onto stack
-      Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
-    } else {
-      // Navigating between non-home tabs: replace to avoid infinite stack
-      Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
-    }
+    Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => screen));
   }
 
   @override
@@ -49,18 +55,12 @@ class ArahBottomNavBar extends StatelessWidget {
       currentIndex: currentIndex,
       onTap: (index) => _navigate(index, context),
       backgroundColor: Colors.white,
-      selectedItemColor: const Color(0xFF6A4BFF), // Purple
+      selectedItemColor: const Color(0xFF6A4BFF),
       unselectedItemColor: Colors.blueGrey.shade300,
       showUnselectedLabels: true,
       type: BottomNavigationBarType.fixed,
-      selectedLabelStyle: const TextStyle(
-        fontWeight: FontWeight.w600,
-        fontSize: 12,
-      ),
-      unselectedLabelStyle: const TextStyle(
-        fontWeight: FontWeight.w500,
-        fontSize: 12,
-      ),
+      selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+      unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 12),
       elevation: 8,
       items: const [
         BottomNavigationBarItem(

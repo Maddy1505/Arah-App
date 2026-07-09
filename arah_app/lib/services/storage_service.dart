@@ -12,14 +12,14 @@ class StorageService {
   }
 
   Future<String> uploadTaskAttachment(String taskId, String filePath) async {
-    String fileName = filePath.split('/').last;
+    String fileName = filePath.split(RegExp(r'[/\\]')).last;
     Reference ref = _storage.ref().child('task_attachments/$taskId/$fileName');
     await ref.putFile(File(filePath));
     return await ref.getDownloadURL();
   }
 
   Future<String> uploadChatAttachment(String chatId, String filePath) async {
-    String fileName = filePath.split('/').last;
+    String fileName = filePath.split(RegExp(r'[/\\]')).last;
     String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
     Reference ref = _storage.ref().child('chats/$chatId/${timestamp}_$fileName');
     await ref.putFile(File(filePath));

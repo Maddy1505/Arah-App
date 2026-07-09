@@ -5,10 +5,15 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../../app/theme/app_theme.dart';
 import '../../provider/user_provider.dart';
+import '../../provider/home_provider.dart';
+import '../../provider/order_provider.dart';
 import '../home/home_screen.dart';
+import '../home/seller_home_screen.dart';
 
 class ProfileSetupScreen extends StatefulWidget {
-  const ProfileSetupScreen({super.key});
+  final String role;
+  final String name;
+  const ProfileSetupScreen({super.key, this.role = 'Buyer', this.name = ''});
 
   @override
   State<ProfileSetupScreen> createState() => _ProfileSetupScreenState();
@@ -17,8 +22,7 @@ class ProfileSetupScreen extends StatefulWidget {
 class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   List<String> selectedSkills = [];
   String experienceLevel = "Beginner";
-  File? _profileImage;
-  final ImagePicker _picker = ImagePicker();
+  bool _isSaving = false;
 
   final List<String> allSkills = [
     "Python",
@@ -28,16 +32,18 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     "UI/UX",
     "Content Writing",
     "Video Editing",
+    "Figma",
+    "React",
+    "Data Analysis",
+    "Digital Marketing",
+    "Node.js",
+    "Java",
+    "Kotlin",
+    "Swift",
   ];
-
-  @override
-  void initState() {
-    super.initState();
-  }
 
   void _showPickerOptions(BuildContext context) {
     final userProvider = context.read<UserProvider>();
-    
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.white,
@@ -71,10 +77,67 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     );
   }
 
+  Future<void> _completeSetup() async {
+    setState(() => _isSaving = true);
+    try {
+      final userProvider = context.read<UserProvider>();
+      final uid = userProvider.uid;
+
+      if (uid.isEmpty) {
+        throw Exception('Not authenticated. Please sign in again.');
+      }
+
+      // Update the existing profile with skills and experience
+      await userProvider.updateProfile(
+        experienceLevel: experienceLevel,
+        skills: selectedSkills,
+        name: widget.name.isNotEmpty ? widget.name : null,
+      );
+
+      // Upload profile photo if selected during setup
+      final profileImage = userProvider.profileImageFile;
+      if (profileImage != null) {
+        try {
+          await userProvider.uploadExistingProfileImage(profileImage.path);
+        } catch (_) {
+          // Non-critical — profile still saved without photo
+        }
+      }
+
+      if (!mounted) return;
+
+      // Subscribe providers with the user's UID
+      final homeProvider = context.read<HomeProvider>();
+      homeProvider.subscribeToOpenTasks(excludeUserId: uid);
+
+      final orderProvider = context.read<OrderProvider>();
+      final mode = userProvider.currentMode;
+      orderProvider.subscribeToOrders(uid, isSeller: mode == 'Seller');
+
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(
+          builder: (_) => mode == 'Seller'
+              ? const SellerHomeScreen()
+              : const BuyerHomeScreen(),
+        ),
+        (route) => false,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Setup failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final userProvider = context.watch<UserProvider>();
-    final _profileImage = userProvider.profileImage;
+    final profileImage = userProvider.profileImageFile;
 
     return Scaffold(
       backgroundColor: AppTheme.pureWhite,
@@ -85,7 +148,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SizedBox(height: 10),
-              // Title and Subtitle
               Center(
                 child: Column(
                   children: [
@@ -100,10 +162,12 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      "Let's get to know you better",
+                      "You're all set as a ${widget.role}!\nCustomize your profile to stand out.",
+                      textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 14,
                         color: Colors.blueGrey.shade400,
+                        height: 1.4,
                       ),
                     ),
                   ],
@@ -131,17 +195,17 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                             gap: 4.0,
                           ),
                           child: Container(
-                            margin: const EdgeInsets.all(4), // Inner padding
+                            margin: const EdgeInsets.all(4),
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              image: _profileImage != null
+                              image: profileImage != null
                                   ? DecorationImage(
-                                      image: FileImage(_profileImage!),
+                                      image: FileImage(profileImage),
                                       fit: BoxFit.cover,
                                     )
                                   : null,
                             ),
-                            child: _profileImage == null
+                            child: profileImage == null
                                 ? Icon(
                                     Icons.camera_alt_outlined,
                                     color: Colors.blueGrey.shade300,
@@ -154,11 +218,19 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                     ),
                     const SizedBox(height: 12),
                     const Text(
-                      "Upload Profile Photo / Logo",
+                      "Upload Profile Photo",
                       style: TextStyle(
                         color: AppTheme.navyBlue,
                         fontWeight: FontWeight.w500,
                         fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      "Optional — tap to add",
+                      style: TextStyle(
+                        color: Colors.blueGrey.shade400,
+                        fontSize: 12,
                       ),
                     ),
                   ],
@@ -166,7 +238,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
               ),
               const SizedBox(height: 40),
 
-              // Select your skills
+              // Skills
               const Text(
                 "Select your skills",
                 style: TextStyle(
@@ -175,10 +247,15 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                   color: AppTheme.navyBlue,
                 ),
               ),
+              const SizedBox(height: 6),
+              Text(
+                "Choose all that apply",
+                style: TextStyle(fontSize: 13, color: Colors.blueGrey.shade400),
+              ),
               const SizedBox(height: 16),
               Wrap(
-                spacing: 12,
-                runSpacing: 12,
+                spacing: 10,
+                runSpacing: 10,
                 children: allSkills.map((skill) {
                   bool isSelected = selectedSkills.contains(skill);
                   return GestureDetector(
@@ -191,19 +268,22 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                         }
                       });
                     },
-                    child: Container(
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 18,
-                        vertical: 10,
+                        horizontal: 16,
+                        vertical: 9,
                       ),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: isSelected
+                            ? AppTheme.arahPurple.withOpacity(0.08)
+                            : Colors.white,
                         borderRadius: BorderRadius.circular(24),
                         border: Border.all(
                           color: isSelected
                               ? AppTheme.arahPurple
                               : const Color(0xFFE2E8F0),
-                          width: 1.5,
+                          width: isSelected ? 1.5 : 1,
                         ),
                       ),
                       child: Text(
@@ -212,7 +292,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                           color: isSelected
                               ? AppTheme.arahPurple
                               : Colors.blueGrey.shade700,
-                          fontWeight: FontWeight.w500,
+                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
                           fontSize: 13.5,
                         ),
                       ),
@@ -237,18 +317,23 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                   bool isSelected = experienceLevel == level;
                   return GestureDetector(
                     onTap: () => setState(() => experienceLevel = level),
-                    child: Container(
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
                       margin: const EdgeInsets.only(bottom: 12),
                       padding: const EdgeInsets.symmetric(
                         horizontal: 16,
                         vertical: 16,
                       ),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: isSelected
+                            ? AppTheme.arahPurple.withOpacity(0.04)
+                            : Colors.white,
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: const Color(0xFFE2E8F0),
-                          width: 1.5,
+                          color: isSelected
+                              ? AppTheme.arahPurple
+                              : const Color(0xFFE2E8F0),
+                          width: isSelected ? 1.5 : 1,
                         ),
                       ),
                       child: Row(
@@ -269,10 +354,14 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                           const SizedBox(width: 12),
                           Text(
                             level,
-                            style: const TextStyle(
-                              color: AppTheme.navyBlue,
+                            style: TextStyle(
+                              color: isSelected
+                                  ? AppTheme.arahPurple
+                                  : AppTheme.navyBlue,
                               fontSize: 15,
-                              fontWeight: FontWeight.w500,
+                              fontWeight: isSelected
+                                  ? FontWeight.w600
+                                  : FontWeight.w500,
                             ),
                           ),
                         ],
@@ -288,32 +377,29 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                 width: double.infinity,
                 height: 56,
                 child: ElevatedButton(
-                  onPressed: () {
-                    final userProvider = context.read<UserProvider>();
-                    userProvider.updateExperience(experienceLevel);
-                    for (var skill in selectedSkills) {
-                      if (!userProvider.skills.contains(skill)) {
-                        userProvider.toggleSkill(skill);
-                      }
-                    }
-                    Navigator.pushAndRemoveUntil(
-                      context,
-                      MaterialPageRoute(builder: (_) => const BuyerHomeScreen()),
-                      (route) => false,
-                    );
-                  },
+                  onPressed: _isSaving ? null : _completeSetup,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.arahPurple, // soft light purple
+                    backgroundColor: AppTheme.arahPurple,
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
                     elevation: 0,
                   ),
-                  child: const Text(
-                    "Complete Setup",
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
+                  child: _isSaving
+                      ? const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2.5,
+                          ),
+                        )
+                      : const Text(
+                          "Complete Setup",
+                          style: TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
                 ),
               ),
               const SizedBox(height: 20),
@@ -345,7 +431,7 @@ class DashedCirclePainter extends CustomPainter {
 
     final double radius = size.width / 2;
     final double circumference = 2 * math.pi * radius;
-    const double dashLength = 6.0; // length of each dash
+    const double dashLength = 6.0;
     final int dashCount = (circumference / (dashLength + gap)).floor();
 
     for (int i = 0; i < dashCount; ++i) {
@@ -363,7 +449,5 @@ class DashedCirclePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) {
-    return false;
-  }
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

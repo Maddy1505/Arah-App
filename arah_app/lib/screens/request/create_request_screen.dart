@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:provider/provider.dart';
 import '../../app/theme/app_theme.dart';
 import '../../provider/request_provider.dart';
+import '../../provider/user_provider.dart';
 
 class CreateRequestScreen extends StatefulWidget {
   const CreateRequestScreen({super.key});
@@ -13,6 +14,119 @@ class CreateRequestScreen extends StatefulWidget {
 }
 
 class _CreateRequestScreenState extends State<CreateRequestScreen> {
+  final _titleCtrl = TextEditingController();
+  final _priceCtrl = TextEditingController();
+  final _skillsCtrl = TextEditingController();
+  final _notesCtrl = TextEditingController();
+  final _dateCtrl = TextEditingController();
+
+  String? _selectedCategory;
+  String? _selectedExperience;
+  DateTime? _selectedDate;
+
+  final List<String> _categories = [
+    "Programming",
+    "Design",
+    "Writing",
+    "Video Editing",
+    "Data Analysis",
+    "Digital Marketing",
+  ];
+
+  final List<String> _experienceLevels = [
+    "Beginner",
+    "Intermediate",
+    "Advanced",
+  ];
+
+  @override
+  void dispose() {
+    _titleCtrl.dispose();
+    _priceCtrl.dispose();
+    _skillsCtrl.dispose();
+    _notesCtrl.dispose();
+    _dateCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _selectDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate ?? DateTime.now().add(const Duration(days: 1)),
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (picked != null && picked != _selectedDate) {
+      setState(() {
+        _selectedDate = picked;
+        _dateCtrl.text = "${picked.day}-${picked.month}-${picked.year}";
+      });
+    }
+  }
+
+  Future<void> _submit() async {
+    if (_titleCtrl.text.trim().isEmpty) {
+      _showError("Task title is required");
+      return;
+    }
+    if (_selectedCategory == null) {
+      _showError("Please select a category");
+      return;
+    }
+    if (_selectedExperience == null) {
+      _showError("Please select experience level");
+      return;
+    }
+    if (_priceCtrl.text.trim().isEmpty) {
+      _showError("Price is required");
+      return;
+    }
+
+    final userProvider = context.read<UserProvider>();
+    final requestProvider = context.read<RequestProvider>();
+
+    final tags = _skillsCtrl.text
+        .split(',')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+
+    final success = await requestProvider.submitRequest(
+      buyerId: userProvider.uid,
+      buyerName: userProvider.name,
+      title: _titleCtrl.text.trim(),
+      category: _selectedCategory!,
+      experience: _selectedExperience!,
+      tags: tags,
+      price: _priceCtrl.text.trim(),
+      deadline: _selectedDate,
+      notes: _notesCtrl.text.trim(),
+    );
+
+    if (!mounted) return;
+
+    if (success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Task request posted successfully!"),
+          backgroundColor: Colors.green,
+        ),
+      );
+      Navigator.pop(context);
+    } else {
+      _showError(requestProvider.error ?? "Failed to post task request");
+    }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.redAccent,
+      ),
+    );
+  }
+
   Future<void> _pickDocument(BuildContext context) async {
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
@@ -106,27 +220,31 @@ class _CreateRequestScreenState extends State<CreateRequestScreen> {
             children: [
               _buildLabel("Task Title"),
               TextField(
+                controller: _titleCtrl,
                 decoration: _inputDeco("e.g. Need a Python script for data entry"),
               ),
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         _buildLabel("Category"),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                          decoration: BoxDecoration(
-                            border: Border.all(color: Colors.blueGrey.shade100),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text("Select...", style: TextStyle(color: AppTheme.navyBlue, fontSize: 14)),
-                            ],
-                          ),
+                        DropdownButtonFormField<String>(
+                          value: _selectedCategory,
+                          items: _categories.map((cat) {
+                            return DropdownMenuItem(
+                              value: cat,
+                              child: Text(cat, style: const TextStyle(fontSize: 14)),
+                            );
+                          }).toList(),
+                          onChanged: (val) {
+                            setState(() {
+                              _selectedCategory = val;
+                            });
+                          },
+                          decoration: _inputDeco("Select..."),
                         ),
                       ],
                     ),
@@ -137,18 +255,20 @@ class _CreateRequestScreenState extends State<CreateRequestScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         _buildLabel("Experience"),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                          decoration: BoxDecoration(
-                            border: Border.all(color: Colors.blueGrey.shade100),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text("Beginner Friendly", style: TextStyle(color: AppTheme.navyBlue, fontSize: 14)),
-                            ],
-                          ),
+                        DropdownButtonFormField<String>(
+                          value: _selectedExperience,
+                          items: _experienceLevels.map((exp) {
+                            return DropdownMenuItem(
+                              value: exp,
+                              child: Text(exp, style: const TextStyle(fontSize: 14)),
+                            );
+                          }).toList(),
+                          onChanged: (val) {
+                            setState(() {
+                              _selectedExperience = val;
+                            });
+                          },
+                          decoration: _inputDeco("Select..."),
                         ),
                       ],
                     ),
@@ -157,7 +277,8 @@ class _CreateRequestScreenState extends State<CreateRequestScreen> {
               ),
               _buildLabel("Required Skills"),
               TextField(
-                decoration: _inputDeco("Type and press enter (e.g. Figma, React)"),
+                controller: _skillsCtrl,
+                decoration: _inputDeco("e.g. Figma, React"),
               ),
               _buildLabel("Budget Type"),
               Container(
@@ -247,8 +368,9 @@ class _CreateRequestScreenState extends State<CreateRequestScreen> {
                 children: [
                   Expanded(
                     child: TextField(
+                      controller: _priceCtrl,
                       decoration: _inputDeco(
-                        "\$ 0.00",
+                        "₹ 0.00",
                         suffixIcon: const Icon(Icons.unfold_more, size: 20, color: Colors.blueGrey),
                       ),
                       keyboardType: TextInputType.number,
@@ -257,12 +379,13 @@ class _CreateRequestScreenState extends State<CreateRequestScreen> {
                   const SizedBox(width: 16),
                   Expanded(
                     child: TextField(
+                      controller: _dateCtrl,
                       decoration: _inputDeco(
-                        "dd----yyyy",
+                        "dd-MM-yyyy",
                         suffixIcon: const Icon(Icons.calendar_today_outlined, size: 18, color: Colors.black87),
                       ),
                       readOnly: true,
-                      onTap: () {},
+                      onTap: () => _selectDate(context),
                     ),
                   ),
                 ],
@@ -387,6 +510,7 @@ class _CreateRequestScreenState extends State<CreateRequestScreen> {
               ],
               _buildLabel("Additional Notes"),
               TextField(
+                controller: _notesCtrl,
                 maxLines: 4,
                 decoration: _inputDeco("Provide any extra details here..."),
               ),
@@ -395,7 +519,7 @@ class _CreateRequestScreenState extends State<CreateRequestScreen> {
                 width: double.infinity,
                 height: 52,
                 child: ElevatedButton(
-                  onPressed: () {},
+                  onPressed: requestProvider.isLoading ? null : _submit,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF6A4BFF),
                     shape: RoundedRectangleBorder(
@@ -403,14 +527,20 @@ class _CreateRequestScreenState extends State<CreateRequestScreen> {
                     ),
                     elevation: 0,
                   ),
-                  child: const Text(
-                    "Post Request",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+                  child: requestProvider.isLoading
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                        )
+                      : const Text(
+                          "Post Request",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                 ),
               ),
               const SizedBox(height: 20),

@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../app/theme/app_theme.dart';
-import '../../provider/user_provider.dart';
-import 'profile_setup_screen.dart';
+import '../auth/login_screen.dart';
 
 class RoleSelectionScreen extends StatefulWidget {
   const RoleSelectionScreen({super.key});
@@ -18,12 +17,14 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
     {
       "title": "Buyer - Hire talent",
       "desc": "I want to post tasks and find skilled students.",
+      "icon": "🛒",
     },
     {
       "title": "Seller - Offer skills",
       "desc": "I want to offer my skills and find freelance tasks.",
+      "icon": "💼",
     },
-    {"title": "Both", "desc": "I want to both hire and work."},
+    {"title": "Both", "desc": "I want to both hire and work.", "icon": "⚡"},
   ];
 
   @override
@@ -92,39 +93,74 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                     final isSelected = selectedRole == index;
                     return GestureDetector(
                       onTap: () => setState(() => selectedRole = index),
-                      child: Container(
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
                         margin: const EdgeInsets.only(bottom: 16),
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 20),
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: isSelected
+                              ? AppTheme.arahPurple.withOpacity(0.04)
+                              : Colors.white,
                           borderRadius: BorderRadius.circular(16),
                           border: Border.all(
                             color: isSelected
                                 ? AppTheme.arahPurple
                                 : const Color(0xFFE2E8F0),
-                            width: 1.5,
+                            width: isSelected ? 2 : 1.5,
                           ),
+                          boxShadow: isSelected
+                              ? [
+                                  BoxShadow(
+                                    color:
+                                        AppTheme.arahPurple.withOpacity(0.08),
+                                    blurRadius: 12,
+                                    offset: const Offset(0, 4),
+                                  )
+                                ]
+                              : [],
                         ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                        child: Row(
                           children: [
-                            Text(
-                              roles[index]["title"]!,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 17,
-                                color: AppTheme.navyBlue,
+                          
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    roles[index]["title"]!,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 17,
+                                      color: isSelected
+                                          ? AppTheme.arahPurple
+                                          : AppTheme.navyBlue,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    roles[index]["desc"]!,
+                                    style: TextStyle(
+                                      color: Colors.blueGrey.shade400,
+                                      fontSize: 13.5,
+                                      height: 1.4,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            const SizedBox(height: 8),
-                            Text(
-                              roles[index]["desc"]!,
-                              style: TextStyle(
-                                color: Colors.blueGrey.shade400,
-                                fontSize: 13.5,
-                                height: 1.4,
+                            if (isSelected)
+                              Container(
+                                width: 22,
+                                height: 22,
+                                decoration: const BoxDecoration(
+                                  color: AppTheme.arahPurple,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.check,
+                                    color: Colors.white, size: 14),
                               ),
-                            ),
                           ],
                         ),
                       ),
@@ -137,13 +173,20 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                 height: 56,
                 child: ElevatedButton(
                   onPressed: selectedRole != -1
-                      ? () {
-                          final roleTitle = roles[selectedRole]["title"]!.split(" - ")[0]; // "Buyer", "Seller", or "Both"
-                          context.read<UserProvider>().updateRole(roleTitle);
+                      ? () async {
+                          final roleTitle = roles[selectedRole]["title"]!
+                              .split(" - ")[0]; // "Buyer", "Seller", or "Both"
+
+                          // Persist selected role so LoginScreen/SignupScreen can read it
+                          final prefs = await SharedPreferences.getInstance();
+                          await prefs.setString('selected_role', roleTitle);
+
+                          if (!context.mounted) return;
+                          // Flow: RoleSelection → Login → (Signup) → ProfileSetup → Home
                           Navigator.pushReplacement(
                             context,
                             MaterialPageRoute(
-                              builder: (_) => const ProfileSetupScreen(),
+                              builder: (_) => const LoginScreen(),
                             ),
                           );
                         }
@@ -151,7 +194,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppTheme.arahPurple,
                     disabledBackgroundColor: const Color(0xFFE2E8F0),
-                    disabledForegroundColor: Colors.white,
+                    disabledForegroundColor: Colors.blueGrey,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16),
                     ),
@@ -162,6 +205,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
+                      color: Colors.white,
                     ),
                   ),
                 ),

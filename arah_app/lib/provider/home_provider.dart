@@ -1,94 +1,117 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
-
-// Buyer Task Model
-class TaskModel {
-  final String category;
-  final String price;
-  final String title;
-  final bool isBeginnerFriendly;
-  final String postedTime;
-
-  TaskModel(
-    this.category,
-    this.price,
-    this.title,
-    this.isBeginnerFriendly,
-    this.postedTime,
-  );
-}
-
-// Seller Task Model
-class SellerTaskModel {
-  final String title;
-  final String price;
-  final List<String> tags;
-  final String dueTime;
-
-  SellerTaskModel(this.title, this.price, this.tags, this.dueTime);
-}
+import '../models/task_model.dart';
+import '../services/firestore_service.dart';
 
 class HomeProvider with ChangeNotifier {
   String _selectedCategory = "All";
-  
-  final List<TaskModel> _allTasks = [
-    TaskModel(
-      "Design",
-      "\$50",
-      "Need a logo for my startup",
-      true,
-      "Posted 5 mins ago",
-    ),
-    TaskModel(
-      "Development",
-      "\$120",
-      "Python script for data scraping",
-      false,
-      "Posted 1 hour ago",
-    ),
-    TaskModel(
-      "Writing",
-      "\$75",
-      "Write 3 blog posts about AI",
-      true,
-      "Posted 3 hours ago",
-    ),
-    TaskModel(
-      "Development",
-      "\$30",
-      "Fix a bug in my React app",
-      false,
-      "Posted 5 hours ago",
-    ),
-  ];
+  String _searchQuery = "";
+  double? _maxBudget;
+  List<TaskModel> _firestoreTasks = [];
+  bool _isLoadingTasks = false;
+  StreamSubscription<List<TaskModel>>? _taskSubscription;
 
-  final List<SellerTaskModel> _sellerRecommendedTasks = [
-    SellerTaskModel("Figma UI Design for E-commerce App", "\$150", [
-      "UI/UX",
-      "Figma",
-    ], "Due in: 2 hours"),
-    SellerTaskModel("Write Python automation script", "\$80", [
-      "Python",
-      "Automation",
-    ], "Due in: 5 hours"),
-    SellerTaskModel("Edit 3 short form videos for TikTok", "\$60", [
-      "Video Editing",
-      "Premiere",
-    ], "Due in: 1 day"),
-  ];
+  final FirestoreService _firestoreService = FirestoreService();
+
+  // ─── Getters ───────────────────────────────────────────────────────────────
 
   String get selectedCategory => _selectedCategory;
+  String get searchQuery => _searchQuery;
+  double? get maxBudget => _maxBudget;
+  bool get isLoadingTasks => _isLoadingTasks;
+
+  /// All open tasks from Firestore (already filtered by subscribeToOpenTasks)
+  List<TaskModel> get allTasks => _firestoreTasks;
 
   List<TaskModel> get filteredTasks {
-    if (_selectedCategory == "All") {
-      return _allTasks;
+    List<TaskModel> result = _firestoreTasks;
+
+    if (_selectedCategory != "All") {
+      result = result
+          .where((task) => task.category == _selectedCategory)
+          .toList();
     }
-    return _allTasks.where((task) => task.category == _selectedCategory).toList();
+
+    if (_searchQuery.isNotEmpty) {
+      result = result
+          .where((task) =>
+              task.title.toLowerCase().contains(_searchQuery.toLowerCase()) ||
+              task.description.toLowerCase().contains(_searchQuery.toLowerCase()) ||
+              task.tags.any((tag) => tag.toLowerCase().contains(_searchQuery.toLowerCase())))
+          .toList();
+    }
+
+    if (_maxBudget != null) {
+      result = result.where((task) {
+        final priceString = task.price.replaceAll(RegExp(r'[^0-9]'), '');
+        if (priceString.isNotEmpty) {
+          final price = double.tryParse(priceString) ?? 0;
+          return price <= _maxBudget!;
+        }
+        return true;
+      }).toList();
+    }
+
+    return result;
   }
-  
-  List<SellerTaskModel> get sellerRecommendedTasks => _sellerRecommendedTasks;
+
+  // ─── Load from Firestore ───────────────────────────────────────────────────
+
+  /// Subscribe to open tasks, excluding tasks posted by [excludeUserId].
+  /// Pass the current user's UID so buyers/sellers never see their own tasks.
+  void subscribeToOpenTasks({String excludeUserId = ''}) {
+    _taskSubscription?.cancel();
+    _isLoadingTasks = true;
+    notifyListeners();
+
+    // Always fetch all open tasks so users can see their own requests on the home feeds
+    final stream = _firestoreService.fetchOpenTasksStream();
+
+    _taskSubscription = stream.listen(
+      (tasks) {
+        _firestoreTasks = tasks;
+        _isLoadingTasks = false;
+        notifyListeners();
+      },
+      onError: (e) {
+        debugPrint('HomeProvider stream error: $e');
+        _isLoadingTasks = false;
+        notifyListeners();
+      },
+    );
+  }
+
+  void cancelSubscription() {
+    _taskSubscription?.cancel();
+  }
+
+  // ─── Filters ───────────────────────────────────────────────────────────────
 
   void selectCategory(String category) {
     _selectedCategory = category;
     notifyListeners();
+  }
+
+  void updateSearchQuery(String query) {
+    _searchQuery = query;
+    notifyListeners();
+  }
+
+  void updateMaxBudget(double? budget) {
+    _maxBudget = budget;
+    notifyListeners();
+  }
+
+  void resetFilters() {
+    _selectedCategory = "All";
+    _searchQuery = "";
+    _maxBudget = null;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _taskSubscription?.cancel();
+    super.dispose();
   }
 }

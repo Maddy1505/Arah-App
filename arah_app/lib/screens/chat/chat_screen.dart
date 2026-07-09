@@ -12,12 +12,20 @@ class ChatScreen extends StatefulWidget {
   final String chatId;
   final String otherUserId;
   final String otherUserName;
+  final String taskId;       // Task being discussed (empty if not task-based)
+  final String taskTitle;    // For order creation
+  final String taskPrice;    // For order creation
+  final bool isBuyer;        // If true, show "Assign to Seller" button
 
   const ChatScreen({
     super.key,
-    this.chatId = "user123_seller456",
-    this.otherUserId = "seller456",
-    this.otherUserName = "Alex Johnson",
+    this.chatId = '',
+    this.otherUserId = '',
+    this.otherUserName = 'User',
+    this.taskId = '',
+    this.taskTitle = '',
+    this.taskPrice = '',
+    this.isBuyer = false,
   });
 
   @override
@@ -29,24 +37,70 @@ class _ChatScreenState extends State<ChatScreen> {
   final FirestoreService _firestoreService = FirestoreService();
   final StorageService _storageService = StorageService();
   bool _isUploading = false;
+  bool _isAssigned = false;      // Tracks if already assigned
+  bool _isAssigning = false;     // Tracks assignment in progress
+  String _resolvedChatId = '';   // Actual chatId (may be created on the fly)
 
   @override
   void initState() {
     super.initState();
+    _resolvedChatId = widget.chatId;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final userProvider = Provider.of<UserProvider>(context, listen: false);
-      _firestoreService.createOrGetChatRoom(userProvider.uid, widget.otherUserId);
+      _initChat();
     });
+  }
+
+  Future<void> _initChat() async {
+    final userProvider = Provider.of<UserProvider>(context, listen: false);
+    final uid = userProvider.uid;
+    if (uid.isEmpty || widget.otherUserId.isEmpty) return;
+
+    try {
+      // Create or retrieve chat room (task-scoped if taskId provided) only if we don't have one
+      String chatId = widget.chatId;
+      if (chatId.isEmpty) {
+        chatId = await _firestoreService.createOrGetChatRoom(
+          uid,
+          widget.otherUserId,
+          taskId: widget.taskId.isNotEmpty ? widget.taskId : null,
+        );
+      }
+
+      if (mounted) {
+        setState(() {
+          _resolvedChatId = chatId;
+        });
+      }
+
+      // Check if already assigned
+      if (widget.taskId.isNotEmpty) {
+        final assigned = await _firestoreService.isChatAssigned(chatId);
+        if (mounted) {
+          setState(() => _isAssigned = assigned);
+        }
+      }
+
+      // Mark messages as read
+      _firestoreService.markMessagesAsRead(chatId, uid);
+    } catch (e) {
+      debugPrint('ChatScreen initChat error: $e');
+    }
+  }
+
+  @override
+  void dispose() {
+    _messageController.dispose();
+    super.dispose();
   }
 
   void _sendMessage() async {
     final text = _messageController.text.trim();
-    if (text.isEmpty) return;
+    if (text.isEmpty || _resolvedChatId.isEmpty) return;
 
     final userProvider = Provider.of<UserProvider>(context, listen: false);
-    
+
     final message = Message(
-      id: '', // Firestore generates ID
+      id: '',
       senderId: userProvider.uid,
       content: text,
       type: MessageType.text,
@@ -55,14 +109,14 @@ class _ChatScreenState extends State<ChatScreen> {
     );
 
     _messageController.clear();
-
-    await _firestoreService.sendMessage(widget.chatId, message, widget.otherUserId);
+    await _firestoreService.sendMessage(
+        _resolvedChatId, message, widget.otherUserId);
   }
 
   void _pickAndUploadFile() async {
     FilePickerResult? result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
-      allowedExtensions: ['jpg', 'png', 'pdf', 'doc'],
+      allowedExtensions: ['jpg', 'png', 'pdf', 'doc', 'docx', 'zip'],
     );
 
     if (result != null && result.files.single.path != null) {
@@ -70,8 +124,9 @@ class _ChatScreenState extends State<ChatScreen> {
       try {
         final filePath = result.files.single.path!;
         final userProvider = Provider.of<UserProvider>(context, listen: false);
-        
-        String fileUrl = await _storageService.uploadChatAttachment(widget.chatId, filePath);
+
+        String fileUrl = await _storageService.uploadChatAttachment(
+            _resolvedChatId, filePath);
 
         final message = Message(
           id: '',
@@ -82,15 +137,112 @@ class _ChatScreenState extends State<ChatScreen> {
           isRead: false,
         );
 
-        await _firestoreService.sendMessage(widget.chatId, message, widget.otherUserId);
+        await _firestoreService.sendMessage(
+            _resolvedChatId, message, widget.otherUserId);
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to upload file: $e')));
+          ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Failed to upload file: $e')));
         }
       } finally {
-        if (mounted) {
-          setState(() => _isUploading = false);
-        }
+        if (mounted) setState(() => _isUploading = false);
+      }
+    }
+  }
+
+  /// Buyer taps "Assign to Seller" — shows confirmation then commits
+  void _assignToSeller() async {
+    if (_isAssigned || _isAssigning || widget.taskId.isEmpty) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Assign Task?',
+          style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.navyBlue),
+        ),
+        content: Text(
+          'This will assign "${widget.taskTitle}" to ${widget.otherUserName}. '
+          'The task will be locked to them and move to your Orders page.',
+          style: TextStyle(color: Colors.blueGrey.shade700, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel',
+                style: TextStyle(color: Colors.blueGrey.shade500)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.arahPurple,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('Assign'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _isAssigning = true);
+
+    try {
+      final userProvider = Provider.of<UserProvider>(context, listen: false);
+      final buyerName = userProvider.name;
+      final buyerId = userProvider.uid;
+
+      // Get seller's name
+      final sellerInfo =
+          await _firestoreService.getUserBasicInfo(widget.otherUserId);
+      final sellerName = sellerInfo['name'] ?? widget.otherUserName;
+
+      await _firestoreService.assignTaskToSeller(
+        taskId: widget.taskId,
+        sellerId: widget.otherUserId,
+        sellerName: sellerName,
+        buyerId: buyerId,
+        buyerName: buyerName,
+        chatId: _resolvedChatId,
+        taskTitle: widget.taskTitle,
+        taskPrice: widget.taskPrice,
+      );
+
+      // Send a system message in chat
+      final systemMsg = Message(
+        id: '',
+        senderId: buyerId,
+        content:
+            '✅ Task assigned to $sellerName! Check your Orders page to track progress.',
+        type: MessageType.text,
+        timestamp: DateTime.now(),
+        isRead: false,
+      );
+      await _firestoreService.sendMessage(
+          _resolvedChatId, systemMsg, widget.otherUserId);
+
+      if (mounted) {
+        setState(() {
+          _isAssigned = true;
+          _isAssigning = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Task assigned to ${widget.otherUserName}! 🎉'),
+            backgroundColor: const Color(0xFF10B981),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isAssigning = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Assignment failed: $e')),
+        );
       }
     }
   }
@@ -100,17 +252,24 @@ class _ChatScreenState extends State<ChatScreen> {
     final currentUserId = Provider.of<UserProvider>(context).uid;
 
     return Scaffold(
-      backgroundColor: AppTheme.offWhite, 
+      backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
-        backgroundColor: AppTheme.pureWhite, 
+        backgroundColor: AppTheme.pureWhite,
         foregroundColor: AppTheme.navyBlue,
         titleSpacing: 0,
+        elevation: 0,
         title: Row(
           children: [
             CircleAvatar(
               radius: 18,
               backgroundColor: AppTheme.arahPurple.withOpacity(0.1),
-              child: const Icon(Icons.person, color: AppTheme.arahPurple),
+              child: Text(
+                widget.otherUserName.isNotEmpty
+                    ? widget.otherUserName[0].toUpperCase()
+                    : '?',
+                style: const TextStyle(
+                    color: AppTheme.arahPurple, fontWeight: FontWeight.bold),
+              ),
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -119,65 +278,201 @@ class _ChatScreenState extends State<ChatScreen> {
                 children: [
                   Text(
                     widget.otherUserName,
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold),
                   ),
-                  const Text(
-                    "online",
-                    style: TextStyle(fontSize: 13, color: AppTheme.successGreen),
-                  ),
+                  if (widget.taskTitle.isNotEmpty)
+                    Text(
+                      widget.taskTitle,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.blueGrey.shade500,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    )
+                  else
+                    Text(
+                      'Online',
+                      style: const TextStyle(
+                          fontSize: 12, color: AppTheme.successGreen),
+                    ),
                 ],
               ),
             ),
           ],
         ),
         actions: [
-          IconButton(icon: const Icon(Icons.videocam), onPressed: () {}),
-          IconButton(icon: const Icon(Icons.call), onPressed: () {}),
+          // BUYER-ONLY: Assign to Seller button
+          if (widget.isBuyer && widget.taskId.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: _isAssigned
+                  ? Container(
+                      margin: const EdgeInsets.symmetric(vertical: 10),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF10B981).withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(20),
+                        border:
+                            Border.all(color: const Color(0xFF10B981), width: 1),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.check_circle,
+                              size: 14, color: Color(0xFF10B981)),
+                          SizedBox(width: 4),
+                          Text(
+                            'Assigned',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFF10B981),
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  : ElevatedButton(
+                      onPressed: _isAssigning ? null : _assignToSeller,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.arahPurple,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                        minimumSize: const Size(0, 34),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        elevation: 0,
+                      ),
+                      child: _isAssigning
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                  color: Colors.white, strokeWidth: 2))
+                          : const Text(
+                              'Assign to Seller',
+                              style: TextStyle(
+                                  fontSize: 12, fontWeight: FontWeight.bold),
+                            ),
+                    ),
+            ),
           PopupMenuButton(
             icon: const Icon(Icons.more_vert),
             itemBuilder: (context) => [
-              const PopupMenuItem(child: Text("Report User")),
-              const PopupMenuItem(child: Text("Block User")),
+              const PopupMenuItem(
+                  value: 'report', child: Text("Report User")),
+              const PopupMenuItem(value: 'block', child: Text("Block User")),
             ],
           ),
         ],
       ),
       body: Column(
         children: [
-          Expanded(
-            child: StreamBuilder<List<Message>>(
-              stream: _firestoreService.fetchMessages(widget.chatId),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator(color: AppTheme.arahPurple));
-                }
-                if (snapshot.hasError) {
-                  return Center(child: Text("Error: ${snapshot.error}"));
-                }
-                
-                final messages = snapshot.data ?? [];
-
-                return ListView.builder(
-                  reverse: true, // Show newest at the bottom
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 20),
-                  itemCount: messages.length,
-                  itemBuilder: (context, index) {
-                    final message = messages[messages.length - 1 - index];
-                    final isMe = message.senderId == currentUserId;
-
-                    if (message.type == MessageType.file) {
-                      return _buildFileBubble(message.content, isMe, message.timestamp);
-                    }
-                    return _buildTextBubble(message.content, isMe, message.timestamp);
-                  },
-                );
-              },
+          if (widget.taskId.isNotEmpty)
+            Container(
+              width: double.infinity,
+              color: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.assignment_outlined,
+                      size: 14, color: AppTheme.arahPurple),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      widget.taskTitle,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.blueGrey.shade600,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  Text(
+                    widget.taskPrice,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppTheme.arahPurple,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
             ),
+          Expanded(
+            child: _resolvedChatId.isEmpty
+                ? const Center(
+                    child: CircularProgressIndicator(
+                        color: AppTheme.arahPurple))
+                : StreamBuilder<List<Message>>(
+                    stream:
+                        _firestoreService.fetchMessages(_resolvedChatId),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState ==
+                          ConnectionState.waiting) {
+                        return const Center(
+                            child: CircularProgressIndicator(
+                                color: AppTheme.arahPurple));
+                      }
+                      if (snapshot.hasError) {
+                        return Center(
+                            child: Text("Error: ${snapshot.error}"));
+                      }
+
+                      final messages = snapshot.data ?? [];
+
+                      if (messages.isEmpty) {
+                        return Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.chat_bubble_outline,
+                                  size: 48,
+                                  color: Colors.blueGrey.shade200),
+                              const SizedBox(height: 12),
+                              Text(
+                                'Start the conversation!',
+                                style: TextStyle(
+                                  color: Colors.blueGrey.shade400,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+
+                      return ListView.builder(
+                        reverse: true,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 20),
+                        itemCount: messages.length,
+                        itemBuilder: (context, index) {
+                          final message =
+                              messages[messages.length - 1 - index];
+                          final isMe = message.senderId == currentUserId;
+
+                          if (message.type == MessageType.file) {
+                            return _buildFileBubble(
+                                message.content, isMe, message.timestamp);
+                          }
+                          return _buildTextBubble(
+                              message.content, isMe, message.timestamp);
+                        },
+                      );
+                    },
+                  ),
           ),
           if (_isUploading)
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 4),
-              child: LinearProgressIndicator(color: AppTheme.arahPurple),
+              child:
+                  LinearProgressIndicator(color: AppTheme.arahPurple),
             ),
           _buildMessageInput(),
         ],
@@ -194,32 +489,35 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         child: Container(
           margin: const EdgeInsets.symmetric(vertical: 4),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
             color: isMe ? AppTheme.arahPurple : Colors.white,
             borderRadius: BorderRadius.only(
-              topLeft: const Radius.circular(12),
-              topRight: const Radius.circular(12),
-              bottomLeft: isMe ? const Radius.circular(12) : const Radius.circular(0),
-              bottomRight: isMe ? const Radius.circular(0) : const Radius.circular(12),
+              topLeft: const Radius.circular(16),
+              topRight: const Radius.circular(16),
+              bottomLeft:
+                  isMe ? const Radius.circular(16) : const Radius.circular(4),
+              bottomRight:
+                  isMe ? const Radius.circular(4) : const Radius.circular(16),
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 1,
-                offset: const Offset(0, 1),
+                color: Colors.black.withOpacity(0.04),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
               )
             ],
           ),
           child: Stack(
             children: [
               Padding(
-                padding: const EdgeInsets.only(bottom: 14, right: 36),
+                padding: const EdgeInsets.only(bottom: 16, right: 40),
                 child: Text(
-                  text, 
+                  text,
                   style: TextStyle(
                     color: isMe ? Colors.white : AppTheme.navyBlue,
                     fontSize: 15,
+                    height: 1.4,
                   ),
                 ),
               ),
@@ -237,8 +535,9 @@ class _ChatScreenState extends State<ChatScreen> {
                       ),
                     ),
                     if (isMe) ...[
-                      const SizedBox(width: 4),
-                      const Icon(Icons.done_all, size: 14, color: Colors.white),
+                      const SizedBox(width: 3),
+                      const Icon(Icons.done_all,
+                          size: 14, color: Colors.white70),
                     ]
                   ],
                 ),
@@ -251,6 +550,10 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildFileBubble(String url, bool isMe, DateTime timestamp) {
+    final fileName = url.contains('%2F')
+        ? Uri.decodeComponent(url.split('%2F').last.split('?').first)
+        : 'Attachment';
+
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
       child: ConstrainedBox(
@@ -259,20 +562,22 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         child: Container(
           margin: const EdgeInsets.symmetric(vertical: 4),
-          padding: const EdgeInsets.all(4),
+          padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
             color: isMe ? AppTheme.arahPurple : Colors.white,
             borderRadius: BorderRadius.only(
-              topLeft: const Radius.circular(12),
-              topRight: const Radius.circular(12),
-              bottomLeft: isMe ? const Radius.circular(12) : const Radius.circular(0),
-              bottomRight: isMe ? const Radius.circular(0) : const Radius.circular(12),
+              topLeft: const Radius.circular(16),
+              topRight: const Radius.circular(16),
+              bottomLeft:
+                  isMe ? const Radius.circular(16) : const Radius.circular(4),
+              bottomRight:
+                  isMe ? const Radius.circular(4) : const Radius.circular(16),
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 1,
-                offset: const Offset(0, 1),
+                color: Colors.black.withOpacity(0.04),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
               )
             ],
           ),
@@ -280,26 +585,29 @@ class _ChatScreenState extends State<ChatScreen> {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: isMe ? Colors.white.withOpacity(0.2) : Colors.black.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(8),
+                  color: isMe
+                      ? Colors.white.withOpacity(0.15)
+                      : const Color(0xFFF1F5F9),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
-                      Icons.insert_drive_file, 
-                      color: isMe ? Colors.white : AppTheme.navyBlue,
-                      size: 32,
+                      Icons.insert_drive_file,
+                      color: isMe ? Colors.white : AppTheme.arahPurple,
+                      size: 28,
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
+                    const SizedBox(width: 10),
+                    Flexible(
                       child: Text(
-                        "Attachment Document",
+                        fileName,
                         style: TextStyle(
                           color: isMe ? Colors.white : AppTheme.navyBlue,
                           fontWeight: FontWeight.w500,
+                          fontSize: 13,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -321,8 +629,9 @@ class _ChatScreenState extends State<ChatScreen> {
                       ),
                     ),
                     if (isMe) ...[
-                      const SizedBox(width: 4),
-                      const Icon(Icons.done_all, size: 14, color: Colors.white),
+                      const SizedBox(width: 3),
+                      const Icon(Icons.done_all,
+                          size: 14, color: Colors.white70),
                     ]
                   ],
                 ),
@@ -336,24 +645,22 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _buildMessageInput() {
     return SafeArea(
-      child: Padding(
+      child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        color: Colors.white,
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Expanded(
               child: Container(
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: const Color(0xFFF1F5F9),
                   borderRadius: BorderRadius.circular(24),
                 ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    IconButton(
-                      icon: const Icon(Icons.emoji_emotions_outlined, color: Colors.grey),
-                      onPressed: () {},
-                    ),
+                    const SizedBox(width: 4),
                     Expanded(
                       child: TextField(
                         controller: _messageController,
@@ -362,17 +669,16 @@ class _ChatScreenState extends State<ChatScreen> {
                         decoration: const InputDecoration(
                           hintText: "Message",
                           border: InputBorder.none,
-                          contentPadding: EdgeInsets.only(top: 12, bottom: 12),
+                          contentPadding:
+                              EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                         ),
+                        onSubmitted: (_) => _sendMessage(),
                       ),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.attach_file, color: Colors.grey),
+                      icon: const Icon(Icons.attach_file,
+                          color: Colors.grey, size: 22),
                       onPressed: _pickAndUploadFile,
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.camera_alt, color: Colors.grey),
-                      onPressed: () {},
                     ),
                   ],
                 ),
@@ -380,13 +686,12 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
             const SizedBox(width: 8),
             Container(
-              margin: const EdgeInsets.only(bottom: 2),
               decoration: const BoxDecoration(
                 color: AppTheme.arahPurple,
                 shape: BoxShape.circle,
               ),
               child: IconButton(
-                icon: const Icon(Icons.send, color: Colors.white, size: 22),
+                icon: const Icon(Icons.send, color: Colors.white, size: 20),
                 onPressed: _sendMessage,
               ),
             ),

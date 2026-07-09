@@ -1,17 +1,31 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'app/theme/app_theme.dart';
-import 'screens/onboarding/role_selection_screen.dart';
-
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
+import 'app/theme/app_theme.dart';
 import 'provider/user_provider.dart';
 import 'provider/home_provider.dart';
 import 'provider/order_provider.dart';
 import 'provider/request_provider.dart';
+import 'screens/onboarding/role_selection_screen.dart';
+import 'screens/home/home_screen.dart';
+import 'screens/home/seller_home_screen.dart';
+import 'screens/onboarding/profile_setup_screen.dart';
+import 'firebase_options.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } catch (e) {
+    if (e.toString().contains('duplicate-app')) {
+      debugPrint('Firebase already initialized: $e');
+    } else {
+      rethrow;
+    }
+  }
   runApp(
     MultiProvider(
       providers: [
@@ -35,13 +49,121 @@ class ArahApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       builder: (context, child) {
-        // Enforce No Scrollbars globally
         return ScrollConfiguration(
           behavior: const NoScrollbarBehavior(),
           child: child!,
         );
       },
-      home: const RoleSelectionScreen(),
+      home: const AuthGate(),
+    );
+  }
+}
+
+/// Listens to Firebase auth state and routes to login or home
+class AuthGate extends StatefulWidget {
+  const AuthGate({super.key});
+
+  @override
+  State<AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<AuthGate> {
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const _LoadingScreen();
+        }
+
+        final user = snapshot.data;
+
+        // Not logged in → show role selection / onboarding
+        if (user == null) {
+          return const RoleSelectionScreen();
+        }
+
+        // Logged in — load user then route
+        return _UserLoader(uid: user.uid);
+      },
+    );
+  }
+}
+
+/// Loads user data from Firestore after confirmed auth, then shows correct home
+class _UserLoader extends StatefulWidget {
+  final String uid;
+  const _UserLoader({required this.uid});
+
+  @override
+  State<_UserLoader> createState() => _UserLoaderState();
+}
+
+class _UserLoaderState extends State<_UserLoader> {
+  bool _loaded = false;
+  bool _needsProfileSetup = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadUser();
+    });
+  }
+
+  Future<void> _loadUser() async {
+    final userProvider = context.read<UserProvider>();
+    await userProvider.loadUser(widget.uid);
+
+    // If user profile doesn't exist in Firestore, send to profile setup
+    if (userProvider.user == null) {
+      if (mounted) setState(() {
+        _loaded = true;
+        _needsProfileSetup = true;
+      });
+      return;
+    }
+
+    final uid = widget.uid;
+
+    // Subscribe HomeProvider with user's UID to exclude own tasks
+    final homeProvider = context.read<HomeProvider>();
+    homeProvider.subscribeToOpenTasks(excludeUserId: uid);
+
+    // Subscribe OrderProvider based on current mode
+    final orderProvider = context.read<OrderProvider>();
+    final mode = userProvider.currentMode;
+    orderProvider.subscribeToOrders(uid, isSeller: mode == 'Seller');
+
+    if (mounted) setState(() => _loaded = true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_loaded) {
+      return const _LoadingScreen();
+    }
+
+    if (_needsProfileSetup) {
+      return const ProfileSetupScreen();
+    }
+
+    final mode = context.read<UserProvider>().currentMode;
+    return mode == 'Seller' ? const SellerHomeScreen() : const BuyerHomeScreen();
+  }
+}
+
+class _LoadingScreen extends StatelessWidget {
+  const _LoadingScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      backgroundColor: AppTheme.pureWhite,
+      body: Center(
+        child: CircularProgressIndicator(color: AppTheme.arahPurple),
+      ),
     );
   }
 }
