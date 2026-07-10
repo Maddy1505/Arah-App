@@ -1,21 +1,73 @@
-# Arah App
+<div align="center">
+  <img src="assets/images/Arah_logo.png" alt="Arah Logo" width="150"/>
+  <h1>Arah App</h1>
+  <p>A peer-to-peer student freelancing platform built with Flutter and Firebase. Students can hire talent (Buyer mode), offer skills (Seller mode), or do both seamlessly within the same app.</p>
 
-A peer-to-peer student freelancing platform built with Flutter + Firebase. Students can hire talent (Buyer mode), offer skills (Seller mode), or do both.
+  <!-- Badges -->
+  <a href="https://flutter.dev/"><img src="https://img.shields.io/badge/Flutter-%2302569B.svg?style=for-the-badge&logo=Flutter&logoColor=white" alt="Flutter"></a>
+  <a href="https://firebase.google.com/"><img src="https://img.shields.io/badge/firebase-%23039BE5.svg?style=for-the-badge&logo=firebase" alt="Firebase"></a>
+  <a href="https://dart.dev/"><img src="https://img.shields.io/badge/dart-%230175C2.svg?style=for-the-badge&logo=dart&logoColor=white" alt="Dart"></a>
+</div>
 
 ---
 
-## Table of Contents
-- [Architecture Overview](#architecture-overview)
-- [User Flows](#user-flows)
-- [Firebase Schema](#firebase-schema)
-- [Workflow Completion Checklist](#workflow-completion-checklist)
+## 🚀 Features
+
+- **Dual-Mode Profiles:** Seamlessly switch between Buyer and Seller modes without needing separate accounts.
+- **Task Marketplace:** Buyers can post tasks and sellers can browse a real-time feed of open opportunities.
+- **In-App Messaging:** Real-time task-scoped chat for negotiating and clarifying requirements.
+- **Order Management:** Track pending and completed tasks, assign tasks to sellers, and manage deliveries.
+- **Rating System:** Two-way 5-star rating system to build trust and reputation in the community.
+- **Cross-Platform:** Beautiful, responsive UI built with Material 3, supporting Android and iOS.
 
 ---
 
-## Architecture Overview
+## 🛠 Tech Stack
 
-| Layer | Tech |
-|-------|------|
+- **UI Framework:** Flutter (Material 3)
+- **State Management:** Provider
+- **Authentication:** Firebase Auth
+- **Database:** Cloud Firestore
+- **Storage:** Firebase Storage
+- **Local Cache:** SharedPreferences
+
+---
+
+## 💻 Setup & Installation
+
+### Prerequisites
+- [Flutter SDK](https://docs.flutter.dev/get-started/install) (v3.0.0 or higher)
+- [Firebase CLI](https://firebase.google.com/docs/cli) (for backend configuration)
+
+### Getting Started
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/Maddy1505/Arah-App.git
+   cd arah_app
+   ```
+
+2. **Install dependencies**
+   ```bash
+   flutter pub get
+   ```
+
+3. **Firebase Setup**
+   - Create a new project in the [Firebase Console](https://console.firebase.google.com/).
+   - Enable Authentication (Email/Password), Cloud Firestore, and Firebase Storage.
+   - Run `flutterfire configure` in the project root to connect your Firebase project.
+
+4. **Run the App**
+   ```bash
+   flutter run
+   ```
+
+---
+
+## 🏗 Architecture Overview
+
+| Layer | Technology |
+|-------|------------|
 | UI | Flutter (Material 3) |
 | State Management | Provider |
 | Auth | Firebase Authentication |
@@ -36,65 +88,29 @@ A peer-to-peer student freelancing platform built with Flutter + Firebase. Stude
 
 ---
 
-## User Flows
+## 🔄 User Flows
 
 ### Onboarding Flow
-```
-RoleSelectionScreen
-  → Saves role to SharedPreferences
-  → LoginScreen
-      → [Sign In] Existing user → (check profile exists) → BuyerHomeScreen / SellerHomeScreen
-      → [Sign Up] → SignupScreen → creates Firebase Auth + minimal Firestore profile
-                                 → ProfileSetupScreen (skills, experience, photo)
-                                 → BuyerHomeScreen / SellerHomeScreen
-```
+- **Role Selection:** Saves preferred role to SharedPreferences.
+- **Authentication:** Existing users log in; new users sign up and set up their profile (skills, experience, photo).
 
 ### Buyer Flow (Hiring Talent)
-```
-BuyerHomeScreen (Discover)
-  ├─ Lists all OPEN tasks (excludes own tasks via Firestore filter)
-  ├─ Search + Category + Budget filters
-  ├─ FAB (+) → CreateRequestScreen → posts task to Firestore
-  └─ Tap task → TaskDetailScreen → "Contact Seller" button
-                                   → ChatScreen (isBuyer=true)
-                                       → [ASSIGN TO SELLER] button (top-right)
-                                         → Confirmation dialog
-                                         → Atomic batch: task.status=in_progress + creates order
-                                         → Button changes to "Assigned ✓"
-
-MyOrdersScreen (Buyer)
-  ├─ Pending tab: Tasks assigned to sellers
-  │   ├─ [Chat] button → ChatScreen
-  │   ├─ [Mark Done] → Confirmation → completeOrder() → rating popup
-  │   └─ [Remove & Reassign] → Confirmation → task back to "open" + order deleted
-  └─ Completed tab: Finished tasks
-      └─ [Rate] button (if not yet rated) → 1–5 star dialog
-```
+- **Discover:** Browse all open tasks in the Home feed (excluding own tasks) with search and budget filters.
+- **Create:** Post new task requests with specific requirements.
+- **Assign:** Chat with interested sellers and assign the task via the "Assign to Seller" button.
+- **Manage & Rate:** Track assigned tasks, mark them as done, and rate the seller.
 
 ### Seller Flow (Offering Skills)
-```
-SellerHomeScreen (Find Work)
-  ├─ Lists all OPEN tasks from Firestore (excludes own tasks posted as buyer)
-  ├─ Search + Category filters
-  └─ Tap task → TaskDetailScreen → "Message to Bid" button
-                                   → ChatScreen (isBuyer=false)
-                                       → NO "Assign to Seller" button (Seller cannot self-assign)
-                                       → Seller sends messages / files to convince Buyer
-
-MyOrdersScreen (Seller)
-  ├─ Pending tab: Tasks assigned to this seller by buyers
-  │   └─ [Open Chat] button only (no assignment controls)
-  └─ Completed tab: Finished tasks
-      └─ [Rate] button (if not yet rated) → 1–5 star dialog
-```
+- **Find Work:** Browse open tasks from other users.
+- **Bid/Message:** Use the "Message to Bid" button to contact buyers and offer services.
+- **Deliver & Rate:** Fulfill assigned tasks, communicate via chat, and rate the buyer upon completion.
 
 ### "Both" Mode Toggle
-- Users with role `"Both"` see a `[Buyer | Seller]` animated pill toggle in the AppBar
-- Tapping switches the active mode, re-subscribes providers, and navigates to the appropriate Home screen
+Users registered with the `"Both"` role see an animated toggle in the AppBar to switch between Buyer and Seller modes instantly.
 
 ---
 
-## Firebase Schema
+## 🗄 Firebase Schema
 
 ### `users/{uid}`
 ```json
@@ -107,20 +123,8 @@ MyOrdersScreen (Seller)
   "skills": ["string"],
   "photoUrl": "string?",
   "bio": "string?",
-  "githubUrl": "string?",
-  "linkedinUrl": "string?",
   "avgRating": "number?",
   "ratingCount": "number?"
-}
-```
-
-### `users/{uid}/ratings/{ratingId}`
-```json
-{
-  "rating": "number (1–5)",
-  "raterId": "string (uid)",
-  "orderId": "string",
-  "createdAt": "Timestamp"
 }
 ```
 
@@ -130,17 +134,10 @@ MyOrdersScreen (Seller)
   "title": "string",
   "description": "string",
   "category": "string",
-  "price": "string (₹amount)",
-  "budgetType": "Fixed Price | Hourly",
+  "price": "string",
   "buyerId": "string (uid)",
-  "buyerName": "string",
   "sellerId": "string (uid, empty when open)",
   "status": "open | in_progress | completed",
-  "isBeginnerFriendly": "boolean",
-  "tags": ["string"],
-  "postedTime": "string",
-  "deadline": "Timestamp?",
-  "attachments": ["string (URLs)"],
   "createdAt": "Timestamp"
 }
 ```
@@ -150,14 +147,9 @@ MyOrdersScreen (Seller)
 {
   "title": "string",
   "price": "string",
-  "clientName": "string",
-  "clientId": "string (uid)",
   "buyerId": "string (uid)",
-  "buyerName": "string",
   "sellerId": "string (uid)",
-  "sellerName": "string",
   "taskId": "string",
-  "chatId": "string",
   "status": "Pending | Completed",
   "ratedByBuyer": "boolean",
   "ratedBySeller": "boolean",
@@ -166,96 +158,12 @@ MyOrdersScreen (Seller)
 ```
 
 ### `chats/{chatId}`
-Chat ID format: `{uid1}_{uid2}_{taskId}` (sorted UIDs, task-scoped)
 ```json
 {
   "participants": ["uid1", "uid2"],
   "lastMessage": "string",
   "lastMessageTimestamp": "Timestamp",
-  "unreadCounts": { "uid1": 0, "uid2": 0 },
   "taskId": "string?",
   "isAssigned": "boolean"
 }
 ```
-
-### `chats/{chatId}/messages/{msgId}`
-```json
-{
-  "senderId": "string (uid)",
-  "content": "string (text or file URL)",
-  "type": "text | image | file",
-  "timestamp": "Timestamp",
-  "isRead": "boolean"
-}
-```
-
----
-
-## Workflow Completion Checklist
-
-### Core Infrastructure
-- [x] Firebase Auth (sign-in, sign-up)
-- [x] Firestore user profile creation
-- [x] Storage service (profile pics, task attachments, chat files)
-- [x] Role-based Provider architecture (UserProvider, HomeProvider, OrderProvider)
-
-### Onboarding Flow
-- [x] RoleSelectionScreen → saves role → navigates to LoginScreen
-- [x] LoginScreen → checks Firestore profile → routes to ProfileSetup or Home
-- [x] SignupScreen → creates auth + minimal profile → routes to ProfileSetup
-- [x] ProfileSetupScreen → updates skills/experience/photo → routes to Home
-- [x] AuthGate in main.dart → handles cold-start auth persistence
-
-### Buyer Home
-- [x] Real Firestore open tasks feed (not mock data)
-- [x] Excludes buyer's own tasks (safety filter in HomeProvider + card build)
-- [x] Search, Category, and Budget filters
-- [x] FAB to create a new task request
-- [x] Task cards with title, description, tags, price, poster info
-- [x] Both-mode animated toggle pill in AppBar
-
-### Seller Home
-- [x] Real Firestore open tasks (same feed as Buyer, excludes own tasks)
-- [x] Local search and category filter
-- [x] "Message to Bid" button (NOT "Take On" — seller cannot self-assign)
-- [x] Task-scoped chat room created on first message
-- [x] Both-mode animated toggle pill in AppBar
-
-### Chat Screen
-- [x] Task context banner (title + price) at top
-- [x] **[CRITICAL FIX]** Buyer-only "Assign to Seller" button in AppBar
-- [x] Assign button shows confirmation dialog before committing
-- [x] Atomic Firestore batch: task status → `in_progress`, sellerId set, order created
-- [x] Button changes to "Assigned ✓" badge after assignment
-- [x] System message sent in chat after assignment
-- [x] File attachment upload to Firebase Storage
-- [x] Real-time message stream from Firestore
-- [x] Messages marked as read on open
-- [x] Seller does NOT see assign button (`isBuyer=false`)
-
-### Orders Screen — Buyer
-- [x] Pending tab: tasks assigned to sellers
-- [x] [Chat] opens task-scoped chat with assignment context
-- [x] [Mark Done] → confirmation → completeOrder() → rating popup auto-launches
-- [x] [Remove & Reassign] → confirmation → deletes order + resets task to "open"
-- [x] Completed tab: finished tasks
-- [x] [Rate] button for unrated completed orders → 1–5 star dialog
-
-### Orders Screen — Seller
-- [x] Pending tab: tasks assigned to this seller
-- [x] [Open Chat] only — no assignment/completion controls
-- [x] Completed tab: finished tasks
-- [x] [Rate] button for unrated completed orders → 1–5 star dialog
-
-### Rating System
-- [x] 5-star rating dialog with emoji labels
-- [x] Rating saved to `users/{uid}/ratings` subcollection
-- [x] Average rating updated on `users/{uid}.avgRating`
-- [x] Order flagged as `ratedByBuyer` / `ratedBySeller` after rating
-- [x] [Rate] button hidden after rating submitted
-
-### Safety & Restrictions
-- [x] Buyer cannot see/interact with own tasks in the home feed
-- [x] Seller cannot self-assign a task
-- [x] TaskDetailScreen shows "This is your task" for own tasks (no action button)
-- [x] ChatScreen: assign button only rendered when `isBuyer=true`
