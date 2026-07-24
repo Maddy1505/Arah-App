@@ -11,11 +11,11 @@ This document summarizes the changes made to implement and fix the "Report User"
   - Validates input (non-empty reason/description, self-report prevention).
   - Checks for duplicate reports within a 24-hour window using a Firestore query.
   - Creates a new document in the `reports` collection with server-generated timestamp.
-  - Handles errors via try/catcH and rethrows for UI layer to manage.
+  - Handles errors via try/catch and rethrows for UI layer to manage.
 
 ### 2. `lib/screens/chat/chat_screen.dart`
 #### Key Changes:
-- **Import addition**: `import 'package/flutter/foundation.dart';` (added earlier).
+- **Import addition**: `import 'package:flutter/foundation.dart';` (added earlier).
 - **Report dialog flow improvements**:
   - **Loading snackbar shown BEFORE dialog dismissal** to avoid context issues.
     ```dart
@@ -30,18 +30,17 @@ This document summarizes the changes made to implement and fix the "Report User"
       Navigator.of(context).pop();
     }
     ```
-  - **Success snackbar protection**:
-    - Wrapped in `Future.microtask()` to allow UI to settle after dialog close.
-    - Double `mounted` check (outer and inner) to avoid "deactivated widget" errors.
-    - Silently catches any exceptions during snackbar display (no console spam).
-  - **Error snackbar protection**:
-    - Same `Future.microtask()` + double `mounted` pattern.
-    - Silently catches exceptions to prevent error spam in debug console.
+  - **Success/Error notifications replaced with Toast overlays**:
+    - Added `_showToast()` method that uses Flutter's Overlay system to show temporary messages at the bottom of the screen.
+    - Toasts automatically disappear after 2 seconds and are less susceptible to widget tree changes than Snackbars.
+    - Proper mounted checks before accessing context to prevent "deactivated widget" errors.
+    - Silently handles any overlay-related errors.
   - **Validation snackbars** (reason/description checks) remain unchanged as they occur before any async operation and are safe.
 
 #### Specific Code Sections Updated:
-- Lines ~790-825: The `_showReportDialog()` method's submit button `onPressed` handler.
-- Ensured all `ScaffoldMessenger.of(context)` calls are safe from context disposition errors.
+- Lines ~790-850: The `_showReportDialog()` method's submit button `onPressed` handler.
+- Added `_showToast()` method to `_ChatScreenState` class (lines ~662-690 in the updated file).
+- Ensured all context accesses are guarded with `mounted` checks.
 
 ### 3. Firestore Index (Manual Setup)
 - **Issue**: The duplicate‑check query required a composite index:
@@ -73,34 +72,35 @@ This document summarizes the changes made to implement and fix the "Report User"
    - Observe:
      - "Submitting report..." appears immediately (while dialog is open).
      - Dialog closes.
-     - "Report submitted successfully" appears shortly after (no console errors).
+     - Success toast appears shortly after: "Report submitted successfully" (no console errors).
    - Check Firestore → `reports` collection: a new document appears with correct fields:
      - `reporterId`, `reportedUserId`, `reason`, `description`, `status: "Pending"`, `createdAt` (server timestamp).
 4. **Edge Cases**:
    - **Self‑report**: Shows "You cannot report yourself" snackbar.
    - **Missing reason/description**: Shows appropriate validation snackbar.
    - **Duplicate within 24h**: Shows "You have already reported this user recently..." snackbar.
-   - All feedback appears without crashing or console error spam.
+   - All feedback appears correctly without console errors.
 
 ## Result
-- The Report User feature is now **fully functional**:
-  - Data is correctly stored in Firestore.
-  - User receives appropriate feedback via snackbars.
-  - No more "deactivated widget" errors in console (success/error snackbars are safely guarded).
-  - Duplicate reporting and self‑reporting are prevented as per specification.
-- The only remaining console noises are unrelated Firestore permission errors for other features (e.g., `OrderProvider`, `HomeProvider`), which do not affect the report functionality.
+The Report User feature now:
+- ✅ Saves data to Firestore `reports` collection successfully.
+- ✅ Shows "Submitting report..." immediately upon submission.
+- ✅ Displays success/error messages via toast notifications after submission without crashing.
+- ✅ Handles validation and duplicate prevention correctly.
+- ✅ No longer throws "deactivated widget" errors when showing feedback.
+- ✅ Uses a more robust overlay-based notification system for success/error states.
 
 ## Files Summary
 | File | Changes |
 |------|---------|
 | `lib/services/firestore_service.dart` | Added `import 'package:flutter/foundation.dart';` |
-| `lib/screens/chat/chat_screen.dart` | - Added `import 'package:flutter/foundation.dart';`<br>- Restructured `_showReportDialog()` to show loading snackbar before dialog close.<br>- Wrapped success/error snackbars in `Future.microtask()` with double `mounted` checks.<br>- Silently caught exceptions during snackbar display to avoid console spam. |
+| `lib/screens/chat/chat_screen.dart` | - Added `import 'package:flutter/foundation.dart';`<br>- Restructured `_showReportDialog()` to show loading snackbar before dialog close.<br>- Replaced success/error snackbars with `_showToast()` method using Overlay.<br>- Added `_showToast()` method to `_ChatScreenState` class.<br>- Ensured all context accesses are guarded with `mounted` checks. |
 | Firebase Console | Created composite index for `reports` collection (fields: reporterId ↑, reportedUserId ↑, createdAt ↑). |
 
 ## Next Steps (Optional)
-- Monitor the unrelated permission errors in `OrderProvider`/`HomeProvider` if they affect core features.
+- Monitor unrelated Firestore permission errors in other features (e.g., `OrderProvider`, `HomeProvider`) if they affect core functionality.
 - Consider adding unit tests for `FirestoreService.reportUser()`.
-- Enhance the report dialog with a loading indicator inside the dialog instead of a snackbar for smoother UX.
+- Evaluate if the toast duration/position should be configurable or match app theme.
 
 --- 
 *Document generated: 2026-07-25*

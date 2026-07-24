@@ -249,6 +249,44 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  void _showToast(String message) {
+    if (!mounted) return;
+    try {
+      final overlay = Overlay.of(context);
+      if (!mounted) return;
+      final entry = OverlayEntry(
+        builder: (context) => Positioned(
+          bottom: MediaQuery.of(context).size.height * 0.1,
+          child: Center(
+            child: Material(
+              color: Colors.transparent,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.8),
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: Text(
+                  message,
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      overlay.insert(entry);
+      Future.delayed(const Duration(seconds: 2)).then((_) {
+        if (mounted) {
+          entry.remove();
+        }
+      });
+    } catch (e) {
+      // Ignore errors related to overlay
+      if (kDebugMode) print('Error showing toast: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final currentUserId = Provider.of<UserProvider>(context).uid;
@@ -809,33 +847,13 @@ class _ChatScreenState extends State<ChatScreen> {
                 debugPrint('[ReportDialog] reportUser succeeded');
 
                 if (mounted) {
-                  Future.microtask(() {
-                    if (mounted) {
-                      try {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Report submitted successfully')),
-                        );
-                      } catch (_) {
-                        // Ignore errors related to context being deactivated
-                      }
-                    }
-                  });
+                  _showToast('Report submitted successfully');
                 }
               } catch (e, stackTrace) {
                 debugPrint('[ReportDialog] reportUser failed: $e');
                 debugPrint('[ReportDialog] Stack trace: $stackTrace');
                 if (mounted) {
-                  Future.microtask(() {
-                    if (mounted) {
-                      try {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Failed to submit report: $e')),
-                        );
-                      } catch (_) {
-                        // Ignore errors related to context being deactivated
-                      }
-                    }
-                  });
+                  _showToast('Failed to submit report: $e');
                 }
               }
             },
